@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <wincrypt.h>
 #include <stdlib.h>
+#include <string.h>
 
 #define DEFAULT_ENTROPY_SIZE 16
 #define MAX_ENTROPY_SIZE 256
@@ -101,8 +102,10 @@ int main() {
         printf("Random String: %s\n", output);
     }
 
+    char sha256_hex[65];
+
     if(!CryptCreateHash(hCryptProv, CALG_SHA_256, 0, 0, &hHash)) {
-        printf("Error code: %lu\n", GetLastError());
+        printf("Error creating hash: %lu\n", GetLastError());
         CryptReleaseContext(hCryptProv, 0);
         free(entropy);
         free(output);
@@ -110,6 +113,7 @@ int main() {
     }
 
     if(!CryptHashData(hHash, entropy, entropy_size, 0)) {
+        printf("Error hashing data: %lu\n", GetLastError());
         CryptDestroyHash(hHash);
         CryptReleaseContext(hCryptProv, 0);
         free(entropy);
@@ -118,6 +122,7 @@ int main() {
     }
 
     if(!CryptGetHashParam(hHash, HP_HASHVAL, hash, &hashLen, 0)) {
+        printf("Error getting hash value: %lu\n", GetLastError());
         CryptDestroyHash(hHash);
         CryptReleaseContext(hCryptProv, 0);
         free(entropy);
@@ -125,9 +130,8 @@ int main() {
         return 1;
     }
 
-    bytes_to_hex(hash, output, 32);
-    printf("SHA256: %s\n", output);
-    fflush(stdout);
+    bytes_to_hex(hash, sha256_hex, 32);
+    printf("SHA256: %s\n", sha256_hex);
 
     CryptDestroyHash(hHash);
     CryptReleaseContext(hCryptProv, 0);
