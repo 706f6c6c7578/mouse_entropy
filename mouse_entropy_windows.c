@@ -17,10 +17,26 @@ void bytes_to_hex(unsigned char *bytes, char *hex, int len) {
     }
 }
 
-void bytes_to_chars(unsigned char *bytes, char *output, int len) {
-    int charset_len = strlen(charset);
-    for (int i = 0; i < len; i++) {
-        output[i] = charset[bytes[i] % charset_len];
+void bytes_to_chars(unsigned char *bytes, char *output, int len, HCRYPTPROV hCryptProv) {
+    const size_t charset_len = strlen(charset);
+    const unsigned char threshold = 256 - (256 % charset_len);
+    int i = 0;
+    int pos = 0;
+    
+    while (pos < len) {
+        if (bytes[i] < threshold) {
+            output[i] = charset[bytes[i] % charset_len];
+            pos++;
+        }
+        i++;
+        if (i >= len * 2) {
+            unsigned char extra_byte;
+            CryptGenRandom(hCryptProv, 1, &extra_byte);
+            if (extra_byte < threshold) {
+                output[pos] = charset[extra_byte % charset_len];
+                pos++;
+            }
+        }
     }
     output[len] = '\0';
 }
@@ -46,7 +62,7 @@ int main() {
     printf("Using %d bytes for entropy collection\n\n", entropy_size);
 
     POINT mousePos, lastPos = {0, 0};
-    unsigned char *entropy = (unsigned char *)malloc(entropy_size);
+    unsigned char *entropy = (unsigned char *)malloc(entropy_size * 2);  // Double size for rejection sampling
     char *output = (char *)malloc(use_chars ? entropy_size + 1 : entropy_size * 2 + 1);
     int count = 0;
     DWORD lastTime = 0;
@@ -68,7 +84,7 @@ int main() {
     printf("Please move your mouse to collect entropy...\n");
     printf("Take your time, each mouse movement is being recorded.\n");
 
-    while (count < entropy_size) {
+    while (count < entropy_size * 2) {  // Collect double entropy for rejection sampling
         GetCursorPos(&mousePos);
         DWORD currentTime = GetTickCount();
         
@@ -81,9 +97,9 @@ int main() {
             entropy[count] = (mousePos.x ^ mousePos.y ^ currentTime ^ random_byte) & 0xFF;
             
             count++;
-            printf("\rProgress: %d%% [", (count * 100) / entropy_size);
-            for(int i = 0; i < count * 20 / entropy_size; i++) printf("#");
-            for(int i = count * 20 / entropy_size; i < 20; i++) printf("-");
+            printf("\rProgress: %d%% [", (count * 100) / (entropy_size * 2));
+            for(int i = 0; i < count * 20 / (entropy_size * 2); i++) printf("#");
+            for(int i = count * 20 / (entropy_size * 2); i < 20; i++) printf("-");
             printf("]");
             fflush(stdout);
             lastTime = currentTime;
@@ -95,7 +111,7 @@ int main() {
     printf("\n\nEntropy collection completed!\n\n");
     
     if (use_chars) {
-        bytes_to_chars(entropy, output, entropy_size);
+        bytes_to_chars(entropy, output, entropy_size, hCryptProv);
         printf("Random Password: %s\n", output);
     } else {
         bytes_to_hex(entropy, output, entropy_size);
@@ -103,7 +119,6 @@ int main() {
     }
 
     char sha256_hex[65];
-
     if(!CryptCreateHash(hCryptProv, CALG_SHA_256, 0, 0, &hHash)) {
         printf("Error creating hash: %lu\n", GetLastError());
         CryptReleaseContext(hCryptProv, 0);

@@ -31,9 +31,25 @@ void bytes_to_hex(const unsigned char *bytes, char *hex, int len) {
 
 void bytes_to_chars(const unsigned char *bytes, char *output, int len) {
     if (!bytes || !output) return;
-    size_t charset_len = strlen(charset);
-    for (int i = 0; i < len; i++) {
-        output[i] = charset[bytes[i] % charset_len];
+    const size_t charset_len = strlen(charset);
+    const unsigned char threshold = 256 - (256 % charset_len);
+    int i = 0;
+    int pos = 0;
+    
+    while (pos < len) {
+        if (bytes[i] < threshold) {
+            output[pos] = charset[bytes[i] % charset_len];
+            pos++;
+        }
+        i++;
+        if (i >= len * 2) {
+            unsigned char extra_byte;
+            RAND_bytes(&extra_byte, 1);
+            if (extra_byte < threshold) {
+                output[pos] = charset[extra_byte % charset_len];
+                pos++;
+            }
+        }
     }
     output[len] = '\0';
 }
@@ -69,7 +85,7 @@ int main(void) {
     printf("Using %d bytes for entropy collection\n\n", entropy_size);
 
     size_t output_size = use_chars ? (entropy_size + 1) : (entropy_size * 2 + 1);
-    entropy = malloc(entropy_size);
+    entropy = malloc(entropy_size * 2);  // Double size for rejection sampling
     output = malloc(output_size);
 
     if (!entropy || !output) {
@@ -77,7 +93,7 @@ int main(void) {
         goto cleanup;
     }
 
-    memset(entropy, 0, entropy_size);
+    memset(entropy, 0, entropy_size * 2);
     memset(output, 0, output_size);
 
     display = XOpenDisplay(NULL);
@@ -101,7 +117,7 @@ int main(void) {
     unsigned int mask_return;
     int last_x = 0, last_y = 0;
 
-    while (running && count < entropy_size) {
+    while (running && count < entropy_size * 2) {  // Collect double entropy for rejection sampling
         if (XQueryPointer(display, root, &root_return, &child_return,
                          &root_x, &root_y, &win_x, &win_y, &mask_return)) {
             
@@ -119,9 +135,9 @@ int main(void) {
                 entropy[count] = (root_x ^ root_y ^ current_time.tv_nsec ^ random_byte) & 0xFF;
                 
                 count++;
-                printf("\rProgress: %d%% [", (count * 100) / entropy_size);
-                for(int i = 0; i < count * 20 / entropy_size; i++) printf("#");
-                for(int i = count * 20 / entropy_size; i < 20; i++) printf("-");
+                printf("\rProgress: %d%% [", (count * 100) / (entropy_size * 2));
+                for(int i = 0; i < count * 20 / (entropy_size * 2); i++) printf("#");
+                for(int i = count * 20 / (entropy_size * 2); i < 20; i++) printf("-");
                 printf("]");
                 fflush(stdout);
 
@@ -137,10 +153,10 @@ int main(void) {
     
     if (use_chars) {
         bytes_to_chars(entropy, output, entropy_size);
-        printf("Random Password: %s", output);
+        printf("Random Password: %s\n", output);
     } else {
         bytes_to_hex(entropy, output, entropy_size);
-        printf("Random String: %s", output);
+        printf("Random String: %s\n", output);
     }
 
     mdctx = EVP_MD_CTX_new();
@@ -155,7 +171,7 @@ int main(void) {
 
     char sha256_hex[65];
     bytes_to_hex(hash, sha256_hex, 32);
-    printf("\nSHA256: %s\n", sha256_hex);
+    printf("SHA256: %s\n", sha256_hex);
 
     status = EXIT_SUCCESS;
 
@@ -163,7 +179,7 @@ cleanup:
     if (mdctx) EVP_MD_CTX_free(mdctx);
     if (display) XCloseDisplay(display);
     if (entropy) {
-        memset(entropy, 0, entropy_size);
+        memset(entropy, 0, entropy_size * 2);
         free(entropy);
     }
     if (output) {
